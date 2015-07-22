@@ -1,0 +1,115 @@
+---
+title: "Practical Machine Learning Assignment"
+output: html_document
+---
+
+## 1.Background
+Using devices such as *Jawbone Up*, *Nike FuelBand*, and *Fitbit* it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, our goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+The goal of this project is to predict the manner in which they did the exercise. This is the “classe” variable in the training set.
+
+## 2.Data
+In this section, we show how we downloaded and loaded the data, followed by some preprocessing.
+```{r}
+setwd("C:/Users/user/Dropbox/coursera/practical machine learning")
+
+#download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv', destfile="training data.csv")
+
+#download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv', destfile="testing data.csv")
+
+training<-read.csv("training data.csv", sep=",", 
+                   na.strings=c("", "NA", "NULL", "#DIV/0!"))
+
+testing<-read.csv("testing data.csv", sep=",", 
+                   na.strings=c("", "NA", "NULL", "#DIV/0!"))
+
+#str(training)
+#head(training)
+dim(training)
+```
+
+##2.1 Preprocessing the data
+From summarising the data (output suppressed not to make it explosive), we notice that many columns have many NAs in them, so they will probably not contribute much to the outcome. As a first step, we check how many features have more than 19000 missing values and drop them.
+```{r}
+#colSums(is.na(training))
+training2<-training[, colSums(is.na(training))<19000]
+dim(training2)
+```
+We also drop some columns that are likely to have little explanatory power because we believe are irrelevant.
+
+```{r}
+vector = c('X', 'user_name', 'raw_timestamp_part_1', 'raw_timestamp_part_2', 
+           'cvtd_timestamp', 'new_window', 'num_window')
+training3<-training2[, -which(names(training2) %in% vector)]
+```
+
+As a next step in pre-processing the data, we can check if any additional variables have near zero variability and remove them. As it turns out, in this case there no such variables after we have removed those with a lot of missing values.
+
+```{r}
+library(caret)
+nzv<-nearZeroVar(training3, saveMetrics=TRUE)
+x<-sum(ifelse(nzv$zeroVar=="TRUE", 1, 0))
+x
+```
+
+Finally, we would like to use only features which have high explanatory power. If two variables are highly correlated, including both in our model is not likely to increase the predictive power of our model. We need to note, however, that high correlation between the feature and the outcome is desirable. Though not shown here, we calculated the correlationa matrix only among the features (excluding the outcome) but detected the same pattern as when building the correlational matrix including the outcome ‘classe’. We drop columns with high correlation (of at least 0.8) and we are certain we have not dropped variables that are highly correlated with the outcome.
+
+```{r}
+corrMatrix<-cor(training3[sapply(training3, is.numeric)])
+library(corrplot)
+corrplot(corrMatrix, order = "FPC", method = "color",  tl.cex = 0.8, 
+                  tl.col = rgb(0, 0, 0))
+removecor = findCorrelation(corrMatrix, cutoff = .80, verbose = FALSE)
+training4=training3[-removecor]
+dim(training4)
+```
+
+Finally, we split the processed data set into a training and testing sample, assigning about 70% of the observations in the training sample and the rest in our testing sample.
+
+```{r}
+inTrain<-createDataPartition(training3$classe, p=0.7, list=FALSE)
+train<-training4[inTrain ,]
+test<-training4[-inTrain ,]
+dim(train)
+```
+
+## 3. Analysis
+### 3.1 Bagging
+Since bagging and random forest are known to perform well and have high predictive power in various environments, we will test both a bagging model and a random forest one (both using the random forest package in R) and will pick the model giving us the lowest error on the testing data.
+
+```{r}
+library(randomForest)
+set.seed(345)
+fit1=randomForest(classe~., data=train, mtry=40, importance=TRUE)
+fit1
+```
+A bagging model is performed using the random forest command and using mtry=40, i.e. using all variables at each split of the tree. The OBB error rate is low, equal to 1.43%. Let’s see which variables are most important, using the varImpPlot in the random forest package and get our confusion matrix, applying the bagged model on the testing data.
+
+```{r}
+yhat1=predict(fit1, newdata=test)
+confusionMatrix(yhat1, test$classe)
+varImpPlot(fit1, )
+```
+
+The accuracy is 0.98, so pretty high. Still, we continue with testing a random forest model we well.
+
+###. 3.2 A random forest model
+A random forest by default would have mtry=sqrt(p), where p are the number of features. Since we have 40 variables, we will use mtry=6. We build the confusion matrix (testing our fit on the testing data) and again plot the importance of the variables in a decreasing order.
+
+```{r}
+set.seed(3456)
+fit2=randomForest(classe~., data=train, mtry=6, importance=TRUE)
+fit2
+yhat2=predict(fit2, newdata=test)
+confusionMatrix(yhat2, test$classe)
+varImpPlot(fit2 , )
+```
+
+We see that the accuracy using the random forest is about 0.99, so it is higher than the bagged model and the random forest is then our preferred model.
+
+## 4. Conclusion
+We fit a random forest model with 6 variables tried at each split and get an accuracy of 0.99 (and OBB error ate of 0.66%). Finally, applying our preferred model to the testing data given in the beginning, we get the following predictions.
+```{r}
+answers<-predict(fit2, newdata=testing)
+answers
+```
